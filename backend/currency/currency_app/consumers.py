@@ -130,35 +130,71 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
                 }))
                 return
             
-            # CONVERSION LOGIC FIX:
-            # 1. Convert from_currency to USD value
-            # 2. Convert USD value to to_currency
+            # CONVERSION LOGIC: Convert both to USD first, then calculate direct rate
+            # 1. Convert from_currency to USD
+            # 2. Convert to_currency to USD  
+            # 3. Calculate direct conversion rate
             
+            # Convert from_currency to 1 USD value
             if "Domestic currency per US Dollar" in from_indicator:
-                # e.g., 1 USD = 23,000 VND, so 1 VND = 1/23000 USD
-                from_in_usd = 1 / from_rate  # Value of 1 unit of domestic currency in USD
+                # e.g., 1 USD = 23,000 VND (rate is 23000)
+                # So 1 VND = 1/23000 USD
+                from_to_usd = 1 / from_rate
             elif "US Dollar per domestic currency" in from_indicator:
-                # e.g., 1 VND = 0.000043 USD
-                from_in_usd = from_rate  # Already in USD per domestic currency
+                # e.g., 1 VND = 0.000043 USD (rate is 0.000043)
+                # So 1 VND = rate USD
+                from_to_usd = from_rate
+            elif "Domestic currency per Euro" in from_indicator:
+                # Need Euro to USD conversion first - for simplicity, use fixed rate
+                # In production, you'd need Euro to USD rates
+                eur_to_usd = 1.1  # Example rate
+                from_to_usd = (1 / from_rate) * eur_to_usd
+            elif "Euros per domestic currency" in from_indicator:
+                eur_to_usd = 1.1
+                from_to_usd = from_rate * eur_to_usd
+            elif "Domestic currency per SDR" in from_indicator:
+                sdr_to_usd = 1.35  # Example SDR to USD rate
+                from_to_usd = (1 / from_rate) * sdr_to_usd
+            elif "SDR per domestic currency" in from_indicator:
+                sdr_to_usd = 1.35
+                from_to_usd = from_rate * sdr_to_usd
             else:
-                # Handle other indicator types (Euros, SDR, etc.)
-                # For now, assume it's "Domestic currency per X"
-                from_in_usd = 1 / from_rate
+                # Default: assume it's like "Domestic currency per US Dollar"
+                from_to_usd = 1 / from_rate
             
+            # Convert to_currency to 1 USD value  
             if "Domestic currency per US Dollar" in to_indicator:
-                # e.g., 1 USD = 23,000 VND
-                # To convert USD to VND: USD_amount * rate
-                converted_amount = (amount * from_in_usd) * to_rate
+                # e.g., 1 USD = 3.67 AED (rate is 3.67)
+                # So 1 AED = 1/3.67 USD
+                to_to_usd = 1 / to_rate
             elif "US Dollar per domestic currency" in to_indicator:
-                # e.g., 1 VND = 0.000043 USD
-                # To convert USD to VND: USD_amount / rate
-                converted_amount = (amount * from_in_usd) / to_rate
+                # e.g., 1 AED = 0.27 USD (rate is 0.27)
+                to_to_usd = to_rate
+            elif "Domestic currency per Euro" in to_indicator:
+                eur_to_usd = 1.1
+                to_to_usd = (1 / to_rate) * eur_to_usd
+            elif "Euros per domestic currency" in to_indicator:
+                eur_to_usd = 1.1
+                to_to_usd = to_rate * eur_to_usd
+            elif "Domestic currency per SDR" in to_indicator:
+                sdr_to_usd = 1.35
+                to_to_usd = (1 / to_rate) * sdr_to_usd
+            elif "SDR per domestic currency" in to_indicator:
+                sdr_to_usd = 1.35
+                to_to_usd = to_rate * sdr_to_usd
             else:
-                # Handle other indicator types
-                converted_amount = (amount * from_in_usd) * to_rate
+                to_to_usd = 1 / to_rate
             
-            # Calculate exchange rate (1 from_currency = X to_currency)
-            exchange_rate = converted_amount / amount if amount != 0 else 0
+            # Calculate direct conversion: 1 from_currency = X to_currency
+            # from_to_usd = value of 1 from_currency in USD
+            # to_to_usd = value of 1 to_currency in USD
+            # So: 1 from_currency = (from_to_usd / to_to_usd) to_currency
+            direct_rate = from_to_usd / to_to_usd if to_to_usd != 0 else 0
+            converted_amount = amount * direct_rate
+            
+            # For display - get the base currency name (not "domestic")
+            from_currency_name = from_country.split(',')[0].split('(')[0].strip() + " currency"
+            to_currency_name = to_country.split(',')[0].split('(')[0].strip() + " currency"
             
             # Send result
             await self.send(text_data=json.dumps({
@@ -170,7 +206,10 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
                     'to_currency': to_currency,
                     'from_rate': from_rate,
                     'to_rate': to_rate,
-                    'exchange_rate': exchange_rate,
+                    'from_to_usd': from_to_usd,
+                    'to_to_usd': to_to_usd,
+                    'exchange_rate': direct_rate,
+                    'exchange_rate_formula': f"{amount} {from_currency_name} = {converted_amount:.6f} {to_currency_name}",
                     'year': year,
                     'month': month
                 }
