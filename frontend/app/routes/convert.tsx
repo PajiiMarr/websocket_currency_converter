@@ -1,41 +1,55 @@
 // app/routes/convert.tsx
+import type { Route } from './+types/convert'
 import { useState, useEffect, useCallback } from 'react';
 import { Calendar } from '~/components/ui/calendar';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card';
+import { Badge } from '~/components/ui/badge';
+import { Button } from '~/components/ui/button';
+import { Separator } from '~/components/ui/separator';
+import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert';
+import { Skeleton } from '~/components/ui/skeleton';
+import { ArrowRightLeft, CalendarIcon, AlertCircle, Loader2, CheckCircle, Info } from 'lucide-react';
 import { format } from 'date-fns';
 import useWebSocket from '~/hooks/useWebSocket';
+
+export function meta(): Route.MetaDescriptors {
+  return [
+    {
+      title: "Currency Converter",
+    },
+  ];
+}
 
 export default function ConvertRoute() {
   const [amount, setAmount] = useState('100');
   const [fromCountry, setFromCountry] = useState('Vietnam');
-  const [toCountry, setToCountry] = useState('Venezuela, República Bolivariana de');
+  const [toCountry, setToCountry] = useState('United States');
   const [fromIndicator, setFromIndicator] = useState('');
   const [toIndicator, setToIndicator] = useState('');
   const [countries, setCountries] = useState<string[]>([]);
   const [indicators, setIndicators] = useState<any[]>([]);
   const [toIndicators, setToIndicators] = useState<any[]>([]);
   const [result, setResult] = useState<any>(null);
-  const [date, setDate] = useState<Date>(new Date(2024, 11, 1)); // Dec 1, 2024
+  const [date, setDate] = useState<Date>(new Date(2024, 11, 1));
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<{[key: string]: string}>({});
   
   const websocketUrl = 'ws://localhost:8000/ws/currency/';
   const { sendMessage, isConnected, lastMessage } = useWebSocket(websocketUrl);
 
-  // Extract year and month from date
   const year = date.getFullYear();
   const month = date.getMonth() + 1;
 
-  // Validation functions
   const validateAmount = useCallback((value: string): string => {
-    if (!value.trim()) return '';
+    if (!value.trim()) return 'Amount is required';
     const num = parseFloat(value);
-    if (isNaN(num)) return 'Amount must be a valid number';
-    if (num <= 0) return 'Amount must be greater than 0';
-    if (num > 1000000000) return 'Amount is too large (max: 1,000,000,000)';
-    if (!/^\d+(\.\d{1,2})?$/.test(value)) return 'Amount can have max 2 decimal places';
+    if (isNaN(num)) return 'Must be a valid number';
+    if (num <= 0) return 'Must be greater than 0';
+    if (num > 1000000000) return 'Maximum: 1,000,000,000';
+    if (!/^\d+(\.\d{1,2})?$/.test(value)) return 'Max 2 decimal places';
     return '';
   }, []);
 
@@ -45,14 +59,14 @@ export default function ConvertRoute() {
     const amountError = validateAmount(amount);
     if (amountError) newErrors.amount = amountError;
     
-    if (!fromIndicator) newErrors.fromIndicator = 'Please select a currency type';
-    if (!toIndicator) newErrors.toIndicator = 'Please select a currency type';
+    if (!fromIndicator) newErrors.fromIndicator = 'Required';
+    if (!toIndicator) newErrors.toIndicator = 'Required';
     
-    if (year < 2000 || year > 2024) newErrors.date = 'Year must be between 2000-2024';
-    if (month < 1 || month > 12) newErrors.date = 'Month must be between 1-12';
+    if (year < 2000 || year > 2024) newErrors.date = 'Year must be 2000-2024';
+    if (month < 1 || month > 12) newErrors.date = 'Month must be 1-12';
     
     if (fromCountry === toCountry && fromIndicator === toIndicator) {
-      newErrors.conversion = 'Cannot convert to the same currency type';
+      newErrors.conversion = 'Cannot convert to same currency';
     }
     
     setErrors(newErrors);
@@ -63,26 +77,22 @@ export default function ConvertRoute() {
     const countryName = country.split(',')[0].split('(')[0].trim();
     
     if (indicator.includes('US Dollar')) {
-      if (indicator.includes('per domestic')) {
-        return `${countryName} currency`;
-      } else {
-        return `USD (from ${countryName})`;
-      }
+      return indicator.includes('per domestic') ? `${countryName}` : 'USD';
     } else if (indicator.includes('Euro')) {
-      if (indicator.includes('per domestic')) {
-        return `${countryName} currency`;
-      } else {
-        return `EUR (from ${countryName})`;
-      }
+      return indicator.includes('per domestic') ? `${countryName}` : 'EUR';
     } else if (indicator.includes('SDR')) {
-      if (indicator.includes('per domestic')) {
-        return `${countryName} currency`;
-      } else {
-        return `SDR (from ${countryName})`;
-      }
+      return indicator.includes('per domestic') ? `${countryName}` : 'SDR';
     }
-    return indicator;
+    return countryName;
   }, []);
+
+  const getCurrencySymbol = useCallback((country: string, indicator: string) => {
+    const display = getCurrencyDisplay(country, indicator);
+    if (display === 'USD') return '$';
+    if (display === 'EUR') return '€';
+    if (display === 'SDR') return 'SDR';
+    return '';
+  }, [getCurrencyDisplay]);
 
   const triggerConversion = useCallback(() => {
     if (!isConnected) {
@@ -114,8 +124,6 @@ export default function ConvertRoute() {
       sendMessage({ type: 'get_countries' });
       sendMessage({ type: 'get_currencies', country: fromCountry });
       sendMessage({ type: 'get_currencies', country: toCountry });
-    } else {
-      setErrors({connection: 'Connecting to server...'});
     }
   }, [isConnected, fromCountry, toCountry]);
 
@@ -164,14 +172,14 @@ export default function ConvertRoute() {
   }, [lastMessage, fromCountry, toCountry, fromIndicator, toIndicator]);
 
   useEffect(() => {
-    if (fromIndicator && toIndicator) {
+    if (fromIndicator && toIndicator && validateSelections()) {
       const timer = setTimeout(() => {
         triggerConversion();
-      }, 500);
+      }, 300);
       
       return () => clearTimeout(timer);
     }
-  }, [amount, fromCountry, fromIndicator, toCountry, toIndicator, year, month, triggerConversion]);
+  }, [amount, fromCountry, fromIndicator, toCountry, toIndicator, year, month, triggerConversion, validateSelections]);
 
   const handleAmountChange = (value: string) => {
     const cleaned = value.replace(/[^\d.]/g, '');
@@ -250,307 +258,421 @@ export default function ConvertRoute() {
   const showEmptyResult = !result || !isConnected || Object.keys(errors).length > 0;
 
   return (
-    <div className="p-6">
-      {errors.connection && (
-        <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-6">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-              </svg>
-            </div>
-            <div className="ml-3">
-              <p className="text-sm text-red-700">{errors.connection}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-        {/* Left Column: Conversion Form */}
-        <div className="bg-white rounded-xl shadow-lg p-6 h-full flex flex-col">
-          <h2 className="text-xl font-semibold mb-4">Currency Conversion</h2>
-          
-          {/* Amount Input */}
-          <div className="mb-4">
-            <Label htmlFor="amount">Amount:</Label>
-            <Input
-              id="amount"
-              type="text"
-              value={amount}
-              onChange={(e) => handleAmountChange(e.target.value)}
-              placeholder="Enter amount"
-              className={`w-full sm:w-48 ${errors.amount ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
-            />
-            {errors.amount && (
-              <p className="mt-1 text-sm text-red-600">{errors.amount}</p>
-            )}
-          </div>
-
-          {/* From Currency */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <div>
-              <Label htmlFor="from-country">From Country:</Label>
-              <Select value={fromCountry} onValueChange={handleFromCountryChange}>
-                <SelectTrigger id="from-country" className="w-full sm:w-48">
-                  <SelectValue placeholder="Select country" />
-                </SelectTrigger>
-                <SelectContent>
-                  {countries.map(country => (
-                    <SelectItem key={`from-${country}`} value={country}>
-                      {country}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div>
-              <Label htmlFor="from-indicator">From Currency Type:</Label>
-              <Select 
-                value={fromIndicator} 
-                onValueChange={handleFromIndicatorChange}
-                disabled={indicators.length === 0}
-              >
-                <SelectTrigger 
-                  id="from-indicator" 
-                  className={`w-full sm:w-48 ${errors.fromIndicator ? 'border-red-500' : ''}`}
-                >
-                  <SelectValue placeholder="Select currency type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {indicators.map(indicator => (
-                    <SelectItem key={`from-ind-${indicator.id}`} value={indicator.INDICATOR}>
-                      {getCurrencyDisplay(fromCountry, indicator.INDICATOR)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {errors.fromIndicator && (
-                <p className="mt-1 text-sm text-red-600">{errors.fromIndicator}</p>
-              )}
-            </div>
-          </div>
-
-          {/* To Currency */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <div>
-              <Label htmlFor="to-country">To Country:</Label>
-              <Select value={toCountry} onValueChange={handleToCountryChange}>
-                <SelectTrigger id="to-country" className="w-full sm:w-48">
-                  <SelectValue placeholder="Select country" />
-                </SelectTrigger>
-                <SelectContent>
-                  {countries.map(country => (
-                    <SelectItem key={`to-${country}`} value={country}>
-                      {country}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div>
-              <Label htmlFor="to-indicator">To Currency Type:</Label>
-              <Select 
-                value={toIndicator} 
-                onValueChange={handleToIndicatorChange}
-                disabled={toIndicators.length === 0}
-              >
-                <SelectTrigger 
-                  id="to-indicator" 
-                  className={`w-full sm:w-48 ${errors.toIndicator ? 'border-red-500' : ''}`}
-                >
-                  <SelectValue placeholder="Select currency type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {toIndicators.map(indicator => (
-                    <SelectItem key={`to-ind-${indicator.id}`} value={indicator.INDICATOR}>
-                      {getCurrencyDisplay(toCountry, indicator.INDICATOR)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {errors.toIndicator && (
-                <p className="mt-1 text-sm text-red-600">{errors.toIndicator}</p>
-              )}
-            </div>
-          </div>
-
-          {/* Date Selection */}
-          <div className="mb-6">
-            <Label>Select Date (Year-Month):</Label>
-            <div className={`border rounded-lg p-3 mt-2 sm:w-100 ${
-              errors.date ? 'border-red-500' : 'border-gray-300'
-            }`}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium">
-                  Selected: {format(date, 'MMMM yyyy')}
-                </span>
-              </div>
-              
-              <Calendar
-                mode="single"
-                selected={date}
-                onSelect={handleDateChange}
-                className="rounded-md border"
-                initialFocus
-                fixedWeeks
-                showOutsideDays={false}
-                fromYear={2000}
-                toYear={2024}
-                classNames={{
-                  caption: "flex justify-center pt-1 relative items-center",
-                  caption_label: "text-sm font-medium",
-                  nav: "space-x-1 flex items-center",
-                  nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
-                  nav_button_previous: "absolute left-1",
-                  nav_button_next: "absolute right-1",
-                  table: "w-full border-collapse space-y-1",
-                  head_row: "flex",
-                  head_cell: "text-gray-500 rounded-md w-9 font-normal text-[0.8rem]",
-                  row: "flex w-full mt-2",
-                  cell: "text-center text-sm p-0 relative [&:has([aria-selected])]:bg-blue-50 first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
-                  day: "h-9 w-9 p-0 font-normal aria-selected:opacity-100",
-                  day_selected: "bg-blue-600 text-white hover:bg-blue-600 hover:text-white focus:bg-blue-600 focus:text-white",
-                  day_today: "bg-blue-100 text-blue-900",
-                  day_outside: "text-gray-400 opacity-50",
-                  day_disabled: "text-gray-400 opacity-50",
-                  day_range_middle: "aria-selected:bg-blue-100 aria-selected:text-blue-900",
-                  day_hidden: "invisible",
-                }}
-              />
-            </div>
-            {errors.date && (
-              <p className="mt-1 text-sm text-red-600">{errors.date}</p>
-            )}
-          </div>
-
-          {/* Errors and Loading */}
-          <div className="mt-auto">
-            {errors.conversion && (
-              <div className="mb-4 p-3 bg-yellow-50 border-l-4 border-yellow-400 w-full sm:w-80">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm text-yellow-700">{errors.conversion}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {errors.server && (
-              <div className="mb-4 p-3 bg-red-50 border-l-4 border-red-500 w-full sm:w-80">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm text-red-700">Server Error: {errors.server}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {isLoading && (
-              <div className="text-center p-3 w-full sm:w-80">
-                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                <p className="mt-2 text-gray-600">Converting...</p>
-              </div>
-            )}
-
-            {Object.keys(errors).length > 0 && !isLoading && !isConnected && (
-              <div className="mt-4 p-3 bg-gray-50 rounded w-full sm:w-80">
-                <p className="text-sm text-gray-600">
-                  Please fix the errors above to see conversion results.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right Column: Result Display */}
-        <div className="bg-white rounded-xl shadow-lg p-6 h-full flex flex-col">
-          <h2 className="text-xl font-semibold mb-4">Conversion Result</h2>
-          
-          <div className="bg-blue-50 p-4 rounded-lg flex-grow flex flex-col">
-            <div className="text-2xl font-bold text-center mb-2 min-h-[60px] flex items-center justify-center">
-              {showEmptyResult || isLoading ? (
-                <span className="text-gray-400">
-                  {isLoading ? 'Converting...' : 'Enter amount and select currencies'}
-                </span>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-4 md:p-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8 text-center">
+          <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
+            Currency Converter
+          </h1>
+          <p className="text-gray-600">
+            Real-time currency conversion with historical exchange rates
+          </p>
+          <div className="flex items-center justify-center gap-2 mt-4">
+            <Badge variant={isConnected ? "default" : "destructive"} className="gap-1">
+              {isConnected ? (
+                <>
+                  <CheckCircle className="w-3 h-3" />
+                  Connected
+                </>
               ) : (
                 <>
-                  {result.original_amount} {getCurrencyDisplay(result.from_currency.country, result.from_currency.indicator)} = 
-                  {result.converted_amount.toFixed(6)} {getCurrencyDisplay(result.to_currency.country, result.to_currency.indicator)}
+                  <AlertCircle className="w-3 h-3" />
+                  Disconnected
                 </>
               )}
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 flex-grow">
-              <div className="bg-white p-3 rounded flex flex-col">
-                <h3 className="font-semibold">From:</h3>
-                {showEmptyResult ? (
-                  <div className="text-gray-400 flex-grow">
-                    <p className="h-6 bg-gray-100 rounded mb-2"></p>
-                    <p className="h-4 bg-gray-100 rounded mb-2"></p>
-                    <p className="h-4 bg-gray-100 rounded"></p>
-                  </div>
-                ) : (
-                  <div className="flex-grow">
-                    <p className="font-medium">{result.from_currency.country}</p>
-                    <p className="text-sm text-gray-600">{result.from_currency.indicator}</p>
-                    {result.from_rate && (
-                      <p className="text-sm mt-2">Rate: {result.from_rate}</p>
-                    )}
-                    <p className="text-xs text-gray-500 mt-auto">Date: {result.year}-{result.month}</p>
-                  </div>
-                )}
-              </div>
-              
-              <div className="bg-white p-3 rounded flex flex-col">
-                <h3 className="font-semibold">To:</h3>
-                {showEmptyResult ? (
-                  <div className="text-gray-400 flex-grow">
-                    <p className="h-6 bg-gray-100 rounded mb-2"></p>
-                    <p className="h-4 bg-gray-100 rounded mb-2"></p>
-                    <p className="h-4 bg-gray-100 rounded"></p>
-                  </div>
-                ) : (
-                  <div className="flex-grow">
-                    <p className="font-medium">{result.to_currency.country}</p>
-                    <p className="text-sm text-gray-600">{result.to_currency.indicator}</p>
-                    {result.to_rate && (
-                      <p className="text-sm mt-2">Rate: {result.to_rate}</p>
-                    )}
-                    <p className="text-xs text-gray-500 mt-auto">Date: {result.year}-{result.month}</p>
-                  </div>
-                )}
-              </div>
-            </div>
-            
-            <div className="mt-4 p-3 bg-gray-50 rounded">
-              <h4 className="font-semibold">Exchange Rate:</h4>
-              {showEmptyResult ? (
-                <p className="text-lg text-gray-400">
-                  Enter valid conversion details
-                </p>
-              ) : (
-                <p className="text-lg">
-                  1 {getCurrencyDisplay(result.from_currency.country, result.from_currency.indicator)} = 
-                  {result.exchange_rate.toFixed(6)} {getCurrencyDisplay(result.to_currency.country, result.to_currency.indicator)}
-                </p>
-              )}
-            </div>
+            </Badge>
+            <Badge variant="outline" className="gap-1">
+              <CalendarIcon className="w-3 h-3" />
+              {format(date, 'MMM yyyy')}
+            </Badge>
           </div>
         </div>
-      </section>
+
+        {errors.connection && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Connection Error</AlertTitle>
+            <AlertDescription>
+              {errors.connection}. Please check your connection and try again.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column: Conversion Form */}
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ArrowRightLeft className="w-5 h-5" />
+                Conversion Settings
+              </CardTitle>
+              <CardDescription>
+                Select currencies and amount to convert
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Amount Input */}
+              <div className="space-y-2">
+                <Label htmlFor="amount" className="text-sm font-medium">
+                  Amount
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="amount"
+                    type="text"
+                    value={amount}
+                    onChange={(e) => handleAmountChange(e.target.value)}
+                    placeholder="0.00"
+                    className={`text-lg font-medium h-12 pl-4 pr-12 ${errors.amount ? 'border-red-500' : ''}`}
+                  />
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500">
+                    {fromIndicator && getCurrencySymbol(fromCountry, fromIndicator)}
+                  </div>
+                </div>
+                {errors.amount && (
+                  <p className="text-sm text-red-600 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" />
+                    {errors.amount}
+                  </p>
+                )}
+              </div>
+
+              {/* Currency Selection */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* From Currency */}
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="from-country" className="text-sm font-medium">
+                      From Currency
+                    </Label>
+                    <Select value={fromCountry} onValueChange={handleFromCountryChange}>
+                      <SelectTrigger id="from-country" className={errors.fromIndicator ? 'border-red-500' : ''}>
+                        <SelectValue placeholder="Select country" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {countries.map(country => (
+                          <SelectItem key={`from-${country}`} value={country}>
+                            {country}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="from-indicator" className="text-sm font-medium">
+                      Currency Type
+                    </Label>
+                    <Select 
+                      value={fromIndicator} 
+                      onValueChange={handleFromIndicatorChange}
+                      disabled={indicators.length === 0}
+                    >
+                      <SelectTrigger id="from-indicator" className={errors.fromIndicator ? 'border-red-500' : ''}>
+                        <SelectValue placeholder="Select type">
+                          {fromIndicator && getCurrencyDisplay(fromCountry, fromIndicator)}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {indicators.map(indicator => (
+                          <SelectItem key={`from-ind-${indicator.id}`} value={indicator.INDICATOR}>
+                            {getCurrencyDisplay(fromCountry, indicator.INDICATOR)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {errors.fromIndicator && (
+                      <p className="text-sm text-red-600 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        {errors.fromIndicator}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* To Currency */}
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="to-country" className="text-sm font-medium">
+                      To Currency
+                    </Label>
+                    <Select value={toCountry} onValueChange={handleToCountryChange}>
+                      <SelectTrigger id="to-country" className={errors.toIndicator ? 'border-red-500' : ''}>
+                        <SelectValue placeholder="Select country" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {countries.map(country => (
+                          <SelectItem key={`to-${country}`} value={country}>
+                            {country}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="to-indicator" className="text-sm font-medium">
+                      Currency Type
+                    </Label>
+                    <Select 
+                      value={toIndicator} 
+                      onValueChange={handleToIndicatorChange}
+                      disabled={toIndicators.length === 0}
+                    >
+                      <SelectTrigger id="to-indicator" className={errors.toIndicator ? 'border-red-500' : ''}>
+                        <SelectValue placeholder="Select type">
+                          {toIndicator && getCurrencyDisplay(toCountry, toIndicator)}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {toIndicators.map(indicator => (
+                          <SelectItem key={`to-ind-${indicator.id}`} value={indicator.INDICATOR}>
+                            {getCurrencyDisplay(toCountry, indicator.INDICATOR)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {errors.toIndicator && (
+                      <p className="text-sm text-red-600 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        {errors.toIndicator}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Date Selection */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium flex items-center gap-2">
+                  <CalendarIcon className="w-4 h-4" />
+                  Historical Date
+                </Label>
+                <div className={`border rounded-lg ${errors.date ? 'border-red-500' : ''}`}>
+                  <Calendar
+                    mode="single"
+                    selected={date}
+                    onSelect={handleDateChange}
+                    className="rounded-md"
+                    initialFocus
+                    fixedWeeks
+                    showOutsideDays={false}
+                    fromYear={2000}
+                    toYear={2024}
+                    classNames={{
+                      caption: "flex justify-center pt-1 relative items-center",
+                      caption_label: "text-sm font-medium",
+                      nav: "space-x-1 flex items-center",
+                      nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
+                      nav_button_previous: "absolute left-1",
+                      nav_button_next: "absolute right-1",
+                      table: "w-full border-collapse space-y-1",
+                      head_row: "flex",
+                      head_cell: "text-gray-500 rounded-md w-9 font-normal text-[0.8rem]",
+                      row: "flex w-full mt-2",
+                      cell: "text-center text-sm p-0 relative [&:has([aria-selected])]:bg-blue-50 first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
+                      day: "h-9 w-9 p-0 font-normal aria-selected:opacity-100",
+                      day_selected: "bg-blue-600 text-white hover:bg-blue-600 hover:text-white focus:bg-blue-600 focus:text-white",
+                      day_today: "bg-blue-100 text-blue-900",
+                      day_outside: "text-gray-400 opacity-50",
+                      day_disabled: "text-gray-400 opacity-50",
+                      day_range_middle: "aria-selected:bg-blue-100 aria-selected:text-blue-900",
+                      day_hidden: "invisible",
+                    }}
+                  />
+                </div>
+                {errors.date && (
+                  <p className="text-sm text-red-600 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" />
+                    {errors.date}
+                  </p>
+                )}
+              </div>
+
+              {/* Conversion Error */}
+              {errors.conversion && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{errors.conversion}</AlertDescription>
+                </Alert>
+              )}
+
+              {/* Server Error */}
+              {errors.server && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>Server Error: {errors.server}</AlertDescription>
+                </Alert>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Right Column: Result Display */}
+          <Card className="h-fit">
+            <CardHeader>
+              <CardTitle>Conversion Result</CardTitle>
+              <CardDescription>
+                Real-time exchange rate calculation
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Main Result */}
+              <div className="text-center space-y-4">
+                {isLoading ? (
+                  <div className="space-y-4">
+                    <Skeleton className="h-12 w-full" />
+                    <div className="flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span className="text-sm text-gray-500">Calculating...</span>
+                    </div>
+                  </div>
+                ) : showEmptyResult ? (
+                  <div className="space-y-4">
+                    <div className="text-3xl font-bold text-gray-300">--</div>
+                    <p className="text-sm text-gray-500">
+                      Enter amount and select currencies to see conversion
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-4xl font-bold text-gray-900">
+                      {getCurrencySymbol(fromCountry, fromIndicator)}
+                      {parseFloat(amount).toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                      })}
+                    </div>
+                    <div className="text-2xl font-semibold text-blue-600">
+                      {getCurrencySymbol(toCountry, toIndicator)}
+                      {result.converted_amount.toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 6
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <Separator />
+
+              {/* Exchange Rate */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Exchange Rate</span>
+                  {!showEmptyResult && !isLoading && (
+                    <span className="font-semibold">
+                      1 {getCurrencyDisplay(fromCountry, fromIndicator)} = {getCurrencySymbol(toCountry, toIndicator)}
+                      {result.exchange_rate.toFixed(6)} {getCurrencyDisplay(toCountry, toIndicator)}
+                    </span>
+                  )}
+                </div>
+                
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Date</span>
+                  <span className="font-medium">{format(date, 'MMMM yyyy')}</span>
+                </div>
+              </div>
+
+              {/* Currency Details */}
+              {!showEmptyResult && !isLoading && (
+                <>
+                  <Separator />
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <div className="font-medium">From</div>
+                        <div className="text-sm text-gray-600">
+                          {result.from_currency.country}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          Rate: {result.from_rate}
+                        </div>
+                      </div>
+                      <Badge variant="outline">
+                        {getCurrencyDisplay(fromCountry, fromIndicator)}
+                      </Badge>
+                    </div>
+                    
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <div className="font-medium">To</div>
+                        <div className="text-sm text-gray-600">
+                          {result.to_currency.country}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          Rate: {result.to_rate}
+                        </div>
+                      </div>
+                      <Badge variant="outline">
+                        {getCurrencyDisplay(toCountry, toIndicator)}
+                      </Badge>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Information Alert */}
+              <Alert>
+                <Info className="h-4 w-4" />
+                <AlertDescription className="text-xs">
+                  Rates are updated in real-time. Conversion uses historical data for selected date.
+                </AlertDescription>
+              </Alert>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Stats Footer */}
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card className="bg-white/50 backdrop-blur-sm">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div>
+                <div className="text-sm text-gray-600">Available Countries</div>
+                <div className="text-2xl font-bold">{countries.length}</div>
+              </div>
+              <Globe className="w-8 h-8 text-blue-500" />
+            </CardContent>
+          </Card>
+          
+          <Card className="bg-white/50 backdrop-blur-sm">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div>
+                <div className="text-sm text-gray-600">Connection Status</div>
+                <div className="text-2xl font-bold">{isConnected ? 'Live' : 'Offline'}</div>
+              </div>
+              <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+            </CardContent>
+          </Card>
+          
+          <Card className="bg-white/50 backdrop-blur-sm">
+            <CardContent className="p-4 flex items-center justify-between">
+              <div>
+                <div className="text-sm text-gray-600">Last Updated</div>
+                <div className="text-2xl font-bold">Now</div>
+              </div>
+              <Clock className="w-8 h-8 text-blue-500" />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
+  );
+}
+
+// Icons for the stats footer
+function Globe({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+    </svg>
+  );
+}
+
+function Clock({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
   );
 }
