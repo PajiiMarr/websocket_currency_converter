@@ -29,17 +29,20 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
                 await self.send_currencies(data)
             elif message_type == 'get_countries':
                 await self.get_countries_list()
-            # === ADVANCED FEATURES DEMO ===
-            elif message_type == 'get_rates_above_average':  # SUBQUERY
-                await self.demo_subquery(data)
-            elif message_type == 'get_average_rate':  # STORED FUNCTION
-                await self.demo_stored_function(data)
-            elif message_type == 'get_rate_summary':  # VIEW
-                await self.demo_view(data)
-            elif message_type == 'update_rate':  # STORED PROCEDURE
-                await self.demo_stored_procedure(data)
-            elif message_type == 'get_audit_logs':  # TRIGGER RESULTS
-                await self.demo_trigger(data)
+            elif message_type == 'get_rates_above_average':
+                await self.demo_subquery(data)  # SUBQUERY demo handler
+            elif message_type == 'get_average_rate':
+                await self.demo_stored_function(data)  # STORED FUNCTION demo handler
+            elif message_type == 'get_rate_summary':
+                await self.demo_view(data)  # VIEW demo handler
+            elif message_type == 'update_rate': 
+                await self.demo_stored_procedure(data)  # STORED PROCEDURE demo handler
+            elif message_type == 'get_audit_logs':
+                await self.demo_trigger(data)  # TRIGGER demo handler
+            elif message_type == 'get_currency_stats':
+                await self.demo_index_performance(data)  # INDEX demo handler
+            elif message_type == 'get_dashboard_data':
+                await self.get_dashboard_data(data)
             elif message_type == 'echo':
                 await self.send(text_data=json.dumps({
                     'type': 'echo',
@@ -52,7 +55,7 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
                     'type': 'error',
                     'message': f'Unknown type: {message_type}'
                 }))
-                
+
         except json.JSONDecodeError:
             await self.send(text_data=json.dumps({
                 'type': 'error',
@@ -64,8 +67,6 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
                 'message': f'Error: {str(e)}'
             }))
 
-    # ============ DATABASE HELPERS ============
-    
     def _get_models(self):
         from .models import Currency, MonthlyRate, CurrencyRateAudit
         return Currency, MonthlyRate, CurrencyRateAudit
@@ -73,14 +74,14 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
     @sync_to_async
     def get_all_countries(self):
         Currency, _, _ = self._get_models()
-        # INDEX: Uses db_index=True on COUNTRY field
+        # INDEX: Using db_index on COUNTRY field
         countries = Currency.objects.values_list('COUNTRY', flat=True).distinct().order_by('COUNTRY')
         return list(countries)
 
     @sync_to_async
     def get_currencies_by_country(self, country):
         Currency, _, _ = self._get_models()
-        # INDEX: Uses composite index idx_country_indicator
+        # INDEX: Using composite index idx_country_indicator
         currencies = Currency.objects.filter(COUNTRY__iexact=country).order_by('INDICATOR')
         return list(currencies.values('id', 'COUNTRY', 'INDICATOR'))
 
@@ -88,7 +89,7 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
     def get_currency_by_indicator(self, country, indicator):
         Currency, _, _ = self._get_models()
         try:
-            # INDEX: Uses composite index idx_country_indicator
+            # INDEX: Using composite index idx_country_indicator
             currency = Currency.objects.get(COUNTRY__iexact=country, INDICATOR__iexact=indicator)
             return {
                 'id': currency.id,
@@ -102,7 +103,7 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
     def get_rate_at_date(self, currency_id, year, month):
         _, MonthlyRate, _ = self._get_models()
         try:
-            # INDEX: Uses idx_currency_date composite index
+            # INDEX: Using idx_currency_date composite index
             rate = MonthlyRate.objects.get(
                 currency_id=currency_id,
                 year=year,
@@ -112,8 +113,6 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
         except Exception:
             return None
 
-    # ============ CONVERSION LOGIC ============
-    
     async def handle_conversion(self, data):
         try:
             amount = float(data.get('amount', 100))
@@ -124,7 +123,6 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
             year = data.get('year', 2024)
             month = data.get('month', 12)
             
-            # Get currencies
             from_currency = await self.get_currency_by_indicator(from_country, from_indicator)
             to_currency = await self.get_currency_by_indicator(to_country, to_indicator)
             
@@ -135,7 +133,6 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
                 }))
                 return
             
-            # Get rates
             from_rate = await self.get_rate_at_date(from_currency['id'], year, month)
             to_rate = await self.get_rate_at_date(to_currency['id'], year, month)
             
@@ -146,7 +143,6 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
                 }))
                 return
             
-            # CONVERSION LOGIC
             if "Domestic currency per US Dollar" in from_indicator:
                 from_to_usd = 1 / from_rate
             elif "US Dollar per domestic currency" in from_indicator:
@@ -225,7 +221,7 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
                 'country': country,
                 'currencies': currencies,
                 'count': len(currencies),
-                'index_info': 'Using composite index: idx_country_indicator'
+                'index_info': 'Using composite index: idx_country_indicator'  # INDEX reference
             }
         }))
 
@@ -237,11 +233,10 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
             'data': {
                 'countries': countries,
                 'count': len(countries),
-                'index_info': 'Using single-column index on COUNTRY field'
+                'index_info': 'Using single-column index on COUNTRY field'  # INDEX reference
             }
         }))
 
-    # ============ ADVANCED FEATURES IMPLEMENTATION ============
 
     @sync_to_async
     def _demo_subquery_logic(self, data):
@@ -255,7 +250,7 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
         
         results = []
         for currency in currencies:
-            # SUBQUERY: Get average rate for this currency in the year
+            # SUBQUERY: Creating a subquery to calculate average rate
             avg_subquery = MonthlyRate.objects.filter(
                 currency_id=OuterRef('currency_id'),
                 year=year
@@ -263,14 +258,15 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
                 avg_rate=Avg('rate')
             ).values('avg_rate')
             
-            # Main query using the subquery
+            # QUERY WITH SUBQUERY: Using Subquery in filter condition
             above_avg_rates = MonthlyRate.objects.filter(
                 currency=currency,
                 year=year,
-                rate__gt=Subquery(avg_subquery)
+                rate__gt=Subquery(avg_subquery)  # SUBQUERY usage
             ).order_by('month')
             
             if above_avg_rates.exists():
+                # STORED FUNCTION: Using the stored function equivalent
                 avg_rate = MonthlyRate.calculate_average_rate(currency.id, year)
                 
                 for rate in above_avg_rates:
@@ -298,6 +294,7 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
         if not currency_id:
             return {'error': 'currency_id is required'}
         
+        # STORED FUNCTION: Calling the stored function equivalent
         avg_rate = MonthlyRate.calculate_average_rate(currency_id, year)
         
         return {
@@ -315,7 +312,7 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
         country = data.get('country', 'Vietnam')
         year = data.get('year', 2024)
         
-        # Equivalent to SQL VIEW using Django ORM
+        # VIEW: Using the view-like structure from custom manager
         summary = MonthlyRate.objects.get_summary_view().filter(
             currency__COUNTRY__iexact=country,
             year=year
@@ -326,7 +323,7 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
     @sync_to_async
     def _demo_stored_procedure_logic(self, data):
         """STORED PROCEDURE: Update rate with validation"""
-        _, MonthlyRate, _ = self._get_models()
+        Currency, MonthlyRate, _ = self._get_models()
         
         try:
             currency_id = data['currency_id']
@@ -334,7 +331,8 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
             month = data['month']
             rate = float(data['rate'])
             
-            result = MonthlyRate.objects.update_rate_procedure(
+            # STORED PROCEDURE: Calling the stored procedure equivalent
+            result = MonthlyRate.update_rate_procedure(
                 currency_id=currency_id,
                 year=year,
                 month=month,
@@ -344,38 +342,135 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
             return result
             
         except ValidationError as e:
-            return {'error': f'Validation Error: {str(e)}'}
+            return {'error': f'Validation Error: {str(e)}', 'status': 'error'}
         except KeyError as e:
-            return {'error': f'Missing parameter: {str(e)}'}
+            return {'error': f'Missing parameter: {str(e)}', 'status': 'error'}
         except Exception as e:
-            return {'error': f'Procedure failed: {str(e)}'}
+            return {'error': f'Procedure failed: {str(e)}', 'status': 'error'}
 
     @sync_to_async
     def _demo_trigger_logic(self, data):
         """TRIGGER: Get audit logs created by signal triggers"""
-        _, _, CurrencyRateAudit = self._get_models()
+        Currency, MonthlyRate, CurrencyRateAudit = self._get_models()
         
-        currency_id = data.get('currency_id')
+        country = data.get('country', 'Vietnam')
         limit = data.get('limit', 10)
         
+        # INDEX: Using idx_audit_currency_date index
         queryset = CurrencyRateAudit.objects.all()
-        if currency_id:
-            queryset = queryset.filter(currency_id=currency_id)
+        if country:
+            queryset = queryset.filter(currency_country__iexact=country)
         
-        logs = queryset.select_related('currency').order_by('-updated_at')[:limit]
+        logs = queryset.order_by('-updated_at')[:limit]
         
-        return list(logs.values(
-            'currency__COUNTRY',
-            'currency__INDICATOR',
-            'year',
-            'month',
-            'old_rate',
-            'new_rate',
-            'change_percentage',
-            'updated_at'
-        ))
+        log_list = []
+        for log in logs:
+            log_list.append({
+                'currency_country': log.currency_country,
+                'currency_indicator': log.currency_indicator,
+                'year': log.year,
+                'month': log.month,
+                'old_rate': log.old_rate,
+                'new_rate': log.new_rate,
+                'change_percentage': log.change_percentage,
+                'updated_at': log.updated_at.isoformat() if log.updated_at else None
+            })
+        
+        return log_list
 
-    # ============ WEB SOCKET HANDLERS FOR ADVANCED FEATURES ============
+    @sync_to_async
+    def _demo_index_performance(self, data):
+        """INDEX: Demonstrate performance with and without indexes"""
+        Currency, MonthlyRate, _ = self._get_models()
+        
+        import time
+        start_time = time.time()
+        
+        # INDEX: Using idx_currency_date and COUNTRY index
+        indexed_result = list(MonthlyRate.objects.filter(
+            currency__COUNTRY='Vietnam',
+            year=2024
+        ).select_related('currency').values(
+            'currency__COUNTRY', 'month', 'rate'
+        )[:10])
+        
+        indexed_time = time.time() - start_time
+        
+        stats = {
+            'indexed_query_time_ms': round(indexed_time * 1000, 2),
+            'indexed_results_count': len(indexed_result),
+            'indexes_used': [
+                'idx_currency_date (composite)',
+                'currency.COUNTRY (single column)'
+            ],
+            'performance_tip': 'Indexes speed up WHERE clause filtering and JOIN operations'
+        }
+        
+        return stats
+
+    @sync_to_async
+    def _get_dashboard_data(self, data):
+        """Combined: Get dashboard data using all advanced features"""
+        Currency, MonthlyRate, CurrencyRateAudit = self._get_models()
+        
+        year = data.get('year', 2024)
+        limit = data.get('limit', 5)
+        
+        # VIEW: Using the view-like summary
+        summary_query = MonthlyRate.objects.get_summary_view().filter(
+            year=year
+        ).order_by('-rate')[:limit]
+        
+        summary = []
+        for item in summary_query:
+            item_dict = {
+                'currency__COUNTRY': item['currency__COUNTRY'],
+                'currency__INDICATOR': item['currency__INDICATOR'],
+                'year': item['year'],
+                'month': item['month'],
+                'rate': float(item['rate']) if item['rate'] is not None else 0.0,
+                'base_currency_type': item['base_currency_type']
+            }
+            summary.append(item_dict)
+        
+        top_currencies = Currency.objects.all()[:5]
+        averages = []
+        for currency in top_currencies:
+            # STORED FUNCTION: Using stored function to calculate averages
+            avg = MonthlyRate.calculate_average_rate(currency.id, year)
+            averages.append({
+                'country': currency.COUNTRY,
+                'indicator': currency.INDICATOR,
+                'average_rate': float(avg) if avg is not None else 0.0
+            })
+        
+        recent_logs = []
+        # INDEX: Using idx_audit_currency_date index for ordering
+        audit_logs = CurrencyRateAudit.objects.order_by('-updated_at')[:limit]
+        for log in audit_logs:
+            recent_logs.append({
+                'currency_country': log.currency_country,
+                'old_rate': float(log.old_rate) if log.old_rate is not None else None,
+                'new_rate': float(log.new_rate) if log.new_rate is not None else 0.0,
+                'updated_at': log.updated_at.isoformat() if log.updated_at else None
+            })
+        
+        total_currencies = Currency.objects.count()
+        total_rates = MonthlyRate.objects.count()
+        total_audits = CurrencyRateAudit.objects.count()
+        
+        return {
+            'summary': summary,
+            'averages': averages,
+            'recent_logs': recent_logs,
+            'stats': {
+                'total_currencies': total_currencies,
+                'total_rates': total_rates,
+                'total_audits': total_audits,
+                'year': year
+            }
+        }
+
 
     async def demo_subquery(self, data):
         """Handle subquery demo request"""
@@ -492,4 +587,34 @@ class CurrencyConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'message': f'Trigger demo error: {str(e)}'
+            }))
+
+    async def demo_index_performance(self, data):
+        """Handle index performance demo"""
+        try:
+            stats = await self._demo_index_performance(data)
+            
+            await self.send(text_data=json.dumps({
+                'type': 'index_performance',
+                'data': stats
+            }))
+        except Exception as e:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': f'Index demo error: {str(e)}'
+            }))
+
+    async def get_dashboard_data(self, data):
+        """Handle dashboard data request"""
+        try:
+            dashboard_data = await self._get_dashboard_data(data)
+            
+            await self.send(text_data=json.dumps({
+                'type': 'dashboard_data',
+                'data': dashboard_data
+            }))
+        except Exception as e:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': f'Dashboard data error: {str(e)}'
             }))

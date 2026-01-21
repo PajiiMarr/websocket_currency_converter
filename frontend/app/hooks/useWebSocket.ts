@@ -1,69 +1,99 @@
-// useWebSocket.ts
 import { useEffect, useRef, useCallback, useState } from 'react';
 
 interface UseWebSocketReturn {
   sendMessage: (message: any) => void;
   isConnected: boolean;
   lastMessage: MessageEvent<any> | null;
-  socket: WebSocket | null;
+  error: string | null;
+  connect: () => void;
 }
 
 const useWebSocket = (url: string): UseWebSocketReturn => {
   const socketRef = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [lastMessage, setLastMessage] = useState<MessageEvent<any> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const connect = useCallback(() => {
+    if (socketRef.current) {
+      socketRef.current.close();
+    }
+
+    try {
+      console.log(`Attempting to connect to: ${url}`);
+      const socket = new WebSocket(url);
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        console.log('✅ WebSocket Connected');
+        setIsConnected(true);
+        setError(null);
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = null;
+        }
+      };
+
+      socket.onmessage = (event: MessageEvent) => {
+        console.log('📨 WebSocket Message:', event.data);
+        setLastMessage(event);
+      };
+
+      socket.onerror = (event: Event) => {
+        console.error('❌ WebSocket Error:', event);
+        setError('WebSocket connection error');
+        setIsConnected(false);
+      };
+
+      socket.onclose = (event: CloseEvent) => {
+        console.log(`🔌 WebSocket Disconnected. Code: ${event.code}, Reason: ${event.reason}`);
+        setIsConnected(false);
+        
+        if (event.code !== 1000) {
+          console.log('Attempting to reconnect in 3 seconds...');
+          reconnectTimeoutRef.current = setTimeout(() => {
+            connect();
+          }, 3000);
+        }
+      };
+    } catch (err) {
+      console.error('Failed to create WebSocket:', err);
+      setError('Failed to establish WebSocket connection');
+    }
+  }, [url]);
+
+  const sendMessage = useCallback((message: any) => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      console.log('📤 Sending message:', message);
+      socketRef.current.send(JSON.stringify(message));
+      return true;
+    }
+    console.warn('⚠️ WebSocket is not connected. Message not sent.');
+    setError('Cannot send message - WebSocket not connected');
+    return false;
+  }, []);
 
   useEffect(() => {
-    // Create the WebSocket connection
-    socketRef.current = new WebSocket(url);
+    connect();
 
-    // Handle connection opening
-    socketRef.current.onopen = () => {
-      console.log('WebSocket Connected');
-      setIsConnected(true);
-    };
-
-    // Handle messages
-    socketRef.current.onmessage = (event: MessageEvent) => {
-      console.log('WebSocket Message Received:', event.data);
-      setLastMessage(event);
-    };
-
-    // Handle errors
-    socketRef.current.onerror = (error: Event) => {
-      console.error('WebSocket Error:', error);
-      setIsConnected(false);
-    };
-
-    // Handle connection closing
-    socketRef.current.onclose = () => {
-      console.log('WebSocket Disconnected');
-      setIsConnected(false);
-    };
-
-    // Cleanup function: Close the connection when the component unmounts
+    // Cleanup
     return () => {
       if (socketRef.current) {
         socketRef.current.close();
       }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
     };
-  }, [url]); // Re-run if the URL changes
-
-  // Function to send messages
-  const sendMessage = useCallback((message: any) => {
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify(message));
-      return true;
-    }
-    console.warn('WebSocket is not connected. Message not sent.');
-    return false;
-  }, []);
+  }, [connect]);
 
   return { 
     sendMessage, 
     isConnected, 
     lastMessage,
-    socket: socketRef.current 
+    error,
+    connect
   };
 };
 
